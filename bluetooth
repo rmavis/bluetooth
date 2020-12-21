@@ -1,0 +1,58 @@
+#!/usr/bin/ruby
+
+require 'open3'
+
+# launcher :: string
+# This should be the name (or path) of the local dmenu-equivalent.
+def launcher
+  "theme-dmenu"
+end
+
+# usage :: string
+def usage
+  <<~HELP
+    usage: bluetooth (help|connect|disconnect)
+
+    bluetooth presents a convenient interface to `bluetoothctl`'s `connect`
+    and `disconnect` commands. It's intended to be used with `dmenu` and
+    `notify-send`, so those programs are also required.
+  HELP
+end
+
+if (ARGV.length != 1)
+  puts usage
+  exit
+end
+
+command = ARGV[0].downcase
+prompt = nil
+if (command == "connect")
+  prompt = "Connect with bluetooth"
+elsif (command == "disconnect")
+  prompt = "Disconnect from bluetooth"
+else
+  puts usage
+  exit
+end
+
+devices = (
+  `bluetoothctl devices`.split("\n").map do |line|
+    parts = line.match(/^Device (([0-9A-F]{2}:)+[0-9A-F]{2}) (.+)$/)
+    "#{parts[3]} (#{parts[1]})"
+  end
+).join("\n")
+
+choice = `echo "#{devices}" | #{launcher} -p "#{prompt}"`
+if (choice.length > 0)
+  parts = choice.match(/^(.+) \((([0-9A-F]{2}:)+[0-9A-F]{2})\)$/)
+  `notify-send -u low Bluetooth "Attempting to #{command} with #{parts[1]}"`
+  Open3.popen3("bluetoothctl #{command} #{parts[2]}") do |stdin, stdout, stderr, wait_thread|
+    # Display the last line of bluetoothctl's output.
+    while ((output = stdout.read.chomp) != "") do
+      `notify-send -u low Bluetooth "#{output.split("\n")[-1]}"`
+    end
+    while ((output = stderr.read.chomp) != "") do
+      `notify-send -u critical Bluetooth "#{output.split("\n")[-1]}"`
+    end
+  end
+end
